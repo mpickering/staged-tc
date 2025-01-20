@@ -36,7 +36,7 @@ intEq :: Eq Int
 intEq = Eq (\x y -> [| primEq $x $y |])
 
 threeEq :: Code (Int -> Int -> Int -> Bool)
-threeEq = [| \x y z -> ~(intEq.eq [| x |] [| y |]) && ~(intEq.eq [| x |] [| y |]) |]
+threeEq = [| \x y z -> $(intEq.eq [| x |] [| y |]) && $(intEq.eq [| x |] [| y |]) |]
 ```
 
 This is still very hand-wavy. In traditional MSP, this implies that threeEq is a compile-time binding which will be inlined everywhere. We most likely want it to be a run-time binding, but this isn't easy to express.
