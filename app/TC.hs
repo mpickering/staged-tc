@@ -4,6 +4,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StaticPointers #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes #-}
 module TC where
 
 import Data.SOP
@@ -71,6 +74,71 @@ code_ex_recursiveCF (ShowDictCF{..}) x =
   [|| let go 0 = ""
           go n = $$(appCF showCF [|| n ||])  ++ go (n - 1)
       in go $$x ||]
+
+
+  {-
+
+Not sure what I was trying to achieve here, was just experimenting with polymorphic
+recursion.
+
+data HList xs where
+  Nil :: HList '[]
+  Cons :: x -> HList xs -> HList (x ': xs)
+
+sNil :: ShowDictCF (HList '[])
+sNil = ShowDictCF (C $ \_ -> [|| "[]" ||])
+
+sNilCode :: ShowDictCode (HList '[])
+sNilCode = ShowDictCode ([|| \_ -> "[]" ||])
+
+{-
+Doesn't work, bug in TTH
+
+sCons :: forall x xs . ShowDictCF x -> ShowDictCF (HList xs) -> ShowDictCF (HList (x ': xs))
+sCons (ShowDictCF showA) (ShowDictCF (showXs)) =
+    ShowDictCF $ C $ (\xs ->
+        [|| case $$xs of
+              x `Cons` xs ->
+                  $$(appCF showA [|| x ||])
+                  ++ ":"
+                  ++ $$(appCF showXs [|| xs ||])
+        ||])
+
+sCons :: forall x xs . ShowDictCode x -> ShowDictCode (HList xs) -> ShowDictCode (HList (x ': xs))
+sCons (ShowDictCode showA) (ShowDictCode (showXs)) =
+    ShowDictCode $ (
+        [|| \(x `Cons` xs) ->
+                  $$(upLam showA [|| x ||])
+                  ++ ":"
+                  ++ $$(upLam showXs [|| xs ||])
+        ||])
+
+-}
+
+sCons :: forall x xs . ShowDictCode x -> ShowDictCode (HList xs) -> ShowDictCode (HList (x ': xs))
+sCons (ShowDictCode showA) (ShowDictCode (showXs)) =
+    ShowDictCode $ (
+        [|| \(x `Cons` xs) ->
+                  $$showA x
+                  ++ ":"
+                  ++ $$showXs xs
+        ||])
+
+sTwoList :: ShowDictCode (HList [Int, Int])
+sTwoList = sCons intDictCode (sCons intDictCode sNilCode)
+
+sOneList :: ShowDictCode (HList [Int])
+sOneList = sCons intDictCode sNilCode
+
+{-
+showLayersNil :: ShowDictCode (HList []) -> Up (HList []) -> Up String
+showLayersNil (ShowDictCode xs) hlist = [|| $$xs $$hlist ||]
+
+showLayers :: ShowDictCode (HList xs) -> ShowDictCode (HList (x:xs)) -> Up (HList xs) -> Up String
+showLayers rec (ShowDictCode showCode) hlist =
+  [|| case $$hlist of
+        x `Cons` xs -> $$showCode $$hList ++ "\n" ++ $$(showLayers
+-}
 
 -------
 -- One generic representation of a dictionary?
