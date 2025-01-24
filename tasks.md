@@ -63,6 +63,11 @@ lEq = [|| \xs ys -> fix (\r -> let go [] [] = []
                         go (x:xs) (y:ys) = $$(aEq) x y && go xs ys
                     in go xs ys ||]
 
+Code (Eq [a] => [a] -> [a] -> Bool)
+lEq = [| lEqCode |]
+
+-- W
+
 -- Theorem: Elaboration does not result in non-termination.
 
 [|| $$(power (1+1))  ||]
