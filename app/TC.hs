@@ -25,6 +25,8 @@ downLam f = [|| \x -> $$(f [|| x ||]) ||]
 
 data ShowDict a = ShowDict { showId :: a -> String }
 
+-- Code (ShowDict a)
+
 data ShowDictCode a = ShowDictCode { showCode :: Up (a -> String) }
 
 data CF a where
