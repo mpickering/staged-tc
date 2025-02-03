@@ -92,6 +92,7 @@ sNil = ShowDictCF (C $ \_ -> [|| "[]" ||])
 
 sNilCode :: ShowDictCode (HList '[])
 sNilCode = ShowDictCode ([|| \_ -> "[]" ||])
+-}
 
 {-
 Doesn't work, bug in TTH
@@ -116,7 +117,7 @@ sCons (ShowDictCode showA) (ShowDictCode (showXs)) =
         ||])
 
 -}
-
+{-
 sCons :: forall x xs . ShowDictCode x -> ShowDictCode (HList xs) -> ShowDictCode (HList (x ': xs))
 sCons (ShowDictCode showA) (ShowDictCode (showXs)) =
     ShowDictCode $ (
@@ -131,6 +132,7 @@ sTwoList = sCons intDictCode (sCons intDictCode sNilCode)
 
 sOneList :: ShowDictCode (HList [Int])
 sOneList = sCons intDictCode sNilCode
+-}
 
 {-
 showLayersNil :: ShowDictCode (HList []) -> Up (HList []) -> Up String
@@ -165,6 +167,130 @@ showInt = show @Int
 -- And this works for other modalities as well
 show_x_static :: ShowX StaticPtr Int
 show_x_static = ShowX $ static showInt
+
+
+data DictEq a = DictEq { eq :: a -> a -> Bool
+                       , ceq :: Up (a -> a -> Bool)
+                       }
+
+intDict2 :: DictEq Int
+intDict2 = DictEq (==) [|| (==) @Int ||]
+
+data Tree a = Tip a | Branch (Tree a) (Tree a)
+
+eqTree :: DictEq a -> Tree a -> Tree a -> Bool
+eqTree d1 =
+  let go (Tip a) (Tip b) = eq d1 a b
+      go (Branch t1 t2) (Branch r1 r2) = go t1 t2 && go t2 r2
+  in go
+
+eqTree :: DictEq a -> Up (Tree a -> Tree a -> Bool)
+eqTree d1 = [||
+  let go (Tip a) (Tip b) = $$(ceq d1) a b
+      go (Branch t1 t2) (Branch r1 r2) = go t1 t2 && go t2 r2
+  in go ||]
+
+eqTree2 :: DictEq a -> DictEq (Tree a) -> Tree a -> Tree a -> Bool
+eqTree2 d1 d2 (Tip a) (Tip b) = eq d a b
+eqTree2 d1 d2 (Branch t1 t2) (Branch r1 r2) = eq d1 d2 t1 t2 && eq d1 d2 r1 r2
+
+--treeDict :: DictEq a -> DictEq (Tree a)
+--treeDict d = DictEq eqTree [|| eq treeDict ||]
+
+{-
+
+
+1. You write the same class definition as before?
+
+class Eq a where
+  eq :: a -> a -> Bool
+
+2. New instance for for writing staged instances.
+  * What are the rules about the types these instances have to have.
+
+staged instance Eq Int where
+  eq :: Code (Int -> Int -> Bool)
+
+staged instance (CodeC' (Eq a)) => Eq (Tree a) where
+  eq :: Code (Tree a -> Tree a -> Bool)
+
+
+
+3. New constraint form (Staged (Eq Int)) => Provides new instance
+
+4. What is difference from staging with class.
+
+- Representation of dictionary.
+
+Staging with class => CodeC (Eq a) = Code (EqDict a)
+
+Staging with different class => CodeC' (Eq a) = CodeEqDict { ceq :: Code ( a ->  a -> Bool ) }
+
+5. Introduce deriving staging instance methods from other class methods (under certain conditions).
+
+
+6. Extension .. what about other modalities?
+
+data CF a where
+  Pair :: (CF a, CF b) -> CF (a, b)
+  Func :: (Up a -> CF b) -> CF (a -> b)
+  Prim :: Up a -> CF a
+
+eval :: CF a -> Up a
+
+```
+
+functor CF instance Eq Int where
+  eq :: CF (Int -> Int -> Bool)
+
+
+-- Examples
+
+-- Equality on
+
+1. Non-recursive data-type
+2. Recursive data-type
+
+3. Monads, instances for Monad, Applicative, Functor. Reader, State, Tree
+3a. "Free monad", capability, tagless final style.
+
+
+-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
