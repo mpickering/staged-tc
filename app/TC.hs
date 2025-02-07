@@ -265,7 +265,28 @@ class ClosureFree (a :: Type) where
 
   eval :: CF_D a -> Up a
 
-  repr :: Up a -> (CF_D a -> Up r) -> Up r
+  repr :: Up a -> C (CF_D a)
+
+data ContT m a = ContT { unGen :: forall r . (a -> m r) -> m r }
+
+sink :: ContT m (m a) -> m a
+sink (ContT m) = m id
+
+sinkM :: ClosureFree a => ContT Up (CF_D a) -> Up a
+sinkM = sink . fmap eval
+
+type C = ContT Up
+
+instance Functor (ContT m) where
+  fmap f (ContT k) = ContT $ \k2 -> k (k2 . f)
+
+instance Applicative (ContT m) where
+    pure a = ContT $ \k -> k a
+    (<*>) gf ga = ContT $ \k -> unGen gf $ \f -> unGen ga $ \a -> k (f a)
+
+instance Monad (ContT m) where
+    return = pure
+    (>>=) ga f = ContT $ \k -> unGen ga $ \a -> unGen (f a) k
 
 
 instance ClosureFree Int where
@@ -273,7 +294,7 @@ instance ClosureFree Int where
 
   eval (CF_Int x) = x
 
-  repr x k = k (CF_Int x)
+  repr x = pure (CF_Int x)
 
 newtype CF_Var a = CF_Var (Up a)
 
@@ -281,28 +302,33 @@ getVar (CF_Var x) = x
 toVar x = CF_Var
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a -> b) where
-  data CF_D (a -> b) = CF_Func (CF_Var a -> CF_D b)
+  data CF_D (a -> b) = CF_Func (CF_D a -> C (CF_D b))
 
-  eval (CF_Func f) = [|| \x -> $$(eval (f (CF_Var [|| x ||]))) ||]
+  eval (CF_Func f) = [|| \x -> $$(sink $ do
+                                  v' <- repr [|| x ||]
+                                  v'' <- f v'
+                                  pure $ eval v'') ||]
 
-  repr fx k = k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] eval)
+  repr fx =  pure $ (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||])
 
-      --k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] id)
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a,b) where
   data CF_D (a, b) = CF_Pair (CF_D a) (CF_D b)
 
   eval (CF_Pair a b) = [|| ($$(eval a), $$(eval b)) ||]
 
-  repr fx k = [|| case $$fx of
-                    (a, b) -> $$(repr [|| a ||] $ \a' -> repr [|| b ||] $ \b' -> k (CF_Pair a' b')) ||]
+  repr fx = ContT $ \k -> [|| case $$fx of
+                                (a, b) -> $$(sink $ do
+                                              a' <- repr [|| a ||]
+                                              b' <- repr [|| b ||]
+                                              pure $ k (CF_Pair a' b')) ||]
 
 
 
 f_cf_d :: CF_D (Int -> Int -> Int)
-f_cf_d = CF_Func $ \i -> CF_Func $ \i2 -> CF_Int [|| $$(eval i) + $$(eval i2) ||]
+f_cf_d = CF_Func $ \i -> pure $ CF_Func $ \i2 -> pure $ CF_Int [|| $$(eval i) + $$(eval i2) ||]
 
-apply_cf_d :: CF_D (a -> b) -> CF_D a -> CF_D b
+apply_cf_d :: CF_D (a -> b) -> CF_D a -> C (CF_D b)
 apply_cf_d (CF_Func f) x = f x
 
 a1 = apply_cf_d

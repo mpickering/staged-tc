@@ -21,4 +21,8 @@ r2 x = $$(code_ex_recursive intDictCode [|| x ||])
 r3 x = $$(code_ex_recursiveCF intDictCF [|| x ||])
 -}
 
-r4 x = $$(eval (repr [|| x ||] (\r -> example_cf_d `a1` r)))
+r4 x = $$(sinkM $ do
+                r <- repr [|| x ||]
+                a' <- example_cf_d
+                a1 a' r
+                )
