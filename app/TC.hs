@@ -259,12 +259,13 @@ functor CF instance Eq Int where
 
 -}
 
+
 class ClosureFree (a :: Type) where
   data CF_D a :: Type
 
   eval :: CF_D a -> Up a
 
-  repr :: Up a -> (CF_D a -> r) -> r
+  repr :: Up a -> (CF_D a -> Up r) -> Up r
 
 
 instance ClosureFree Int where
@@ -274,12 +275,28 @@ instance ClosureFree Int where
 
   repr x k = k (CF_Int x)
 
+newtype CF_Var a = CF_Var (Up a)
+
+getVar (CF_Var x) = x
+toVar x = CF_Var
+
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a -> b) where
-  data CF_D (a -> b) = CF_Func (CF_D a -> CF_D b)
+  data CF_D (a -> b) = CF_Func (CF_Var a -> CF_D b)
 
-  eval (CF_Func f) = [|| \x -> $$(eval $ (repr [|| x ||] $ \cf -> f cf)) ||]
+  eval (CF_Func f) = [|| \x -> $$(eval (f (CF_Var [|| x ||]))) ||]
 
-  repr fx k = k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] id)
+  repr fx k = k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] eval)
+
+      --k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] id)
+
+instance (ClosureFree a, ClosureFree b) => ClosureFree (a,b) where
+  data CF_D (a, b) = CF_Pair (CF_D a) (CF_D b)
+
+  eval (CF_Pair a b) = [|| ($$(eval a), $$(eval b)) ||]
+
+  repr fx k = [|| case $$fx of
+                    (a, b) -> $$(repr [|| a ||] $ \a' -> repr [|| b ||] $ \b' -> k (CF_Pair a' b')) ||]
+
 
 
 f_cf_d :: CF_D (Int -> Int -> Int)
