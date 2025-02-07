@@ -10,9 +10,10 @@
 module TC where
 
 import Data.SOP
-import Language.Haskell.TH
+import Language.Haskell.TH hiding (Type)
 import Data.Functor.Identity
 import GHC.StaticPtr
+import Data.Kind ( Type )
 
 type Up = Code Q
 
@@ -183,16 +184,17 @@ eqTree d1 =
   let go (Tip a) (Tip b) = eq d1 a b
       go (Branch t1 t2) (Branch r1 r2) = go t1 t2 && go t2 r2
   in go
-
+    {-
 eqTree :: DictEq a -> Up (Tree a -> Tree a -> Bool)
 eqTree d1 = [||
   let go (Tip a) (Tip b) = $$(ceq d1) a b
       go (Branch t1 t2) (Branch r1 r2) = go t1 t2 && go t2 r2
   in go ||]
+  -}
 
-eqTree2 :: DictEq a -> DictEq (Tree a) -> Tree a -> Tree a -> Bool
-eqTree2 d1 d2 (Tip a) (Tip b) = eq d a b
-eqTree2 d1 d2 (Branch t1 t2) (Branch r1 r2) = eq d1 d2 t1 t2 && eq d1 d2 r1 r2
+--eqTree2 :: DictEq a -> DictEq (Tree a) -> Tree a -> Tree a -> Bool
+--eqTree2 d1 d2 (Tip a) (Tip b) = eq d a b
+--eqTree2 d1 d2 (Branch t1 t2) (Branch r1 r2) = eq d1 d2 t1 t2 && eq d1 d2 r1 r2
 
 --treeDict :: DictEq a -> DictEq (Tree a)
 --treeDict d = DictEq eqTree [|| eq treeDict ||]
@@ -257,9 +259,38 @@ functor CF instance Eq Int where
 
 -}
 
+class ClosureFree (a :: Type) where
+  data CF_D a :: Type
+
+  eval :: CF_D a -> Up a
+
+  repr :: Up a -> (CF_D a -> r) -> r
 
 
+instance ClosureFree Int where
+  data CF_D Int = CF_Int (Up Int)
 
+  eval (CF_Int x) = x
+
+  repr x k = k (CF_Int x)
+
+instance (ClosureFree a, ClosureFree b) => ClosureFree (a -> b) where
+  data CF_D (a -> b) = CF_Func (CF_D a -> CF_D b)
+
+  eval (CF_Func f) = [|| \x -> $$(eval $ (repr [|| x ||] $ \cf -> f cf)) ||]
+
+  repr fx k = k (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||] id)
+
+
+f_cf_d :: CF_D (Int -> Int -> Int)
+f_cf_d = CF_Func $ \i -> CF_Func $ \i2 -> CF_Int [|| $$(eval i) + $$(eval i2) ||]
+
+apply_cf_d :: CF_D (a -> b) -> CF_D a -> CF_D b
+apply_cf_d (CF_Func f) x = f x
+
+a1 = apply_cf_d
+
+example_cf_d = a1 f_cf_d (CF_Int [|| 1 ||])
 
 
 

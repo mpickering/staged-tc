@@ -5,6 +5,7 @@ module Examples where
 
 import TC
 
+{-
 ex_normal, ex_1, ex_2 :: Int -> String
 ex_normal = normal intDict
 
@@ -18,3 +19,6 @@ r1 = recursive intDict
 r2 x = $$(code_ex_recursive intDictCode [|| x ||])
 
 r3 x = $$(code_ex_recursiveCF intDictCF [|| x ||])
+-}
+
+r4 x = $$(eval (repr [|| x ||] (\r -> example_cf_d `a1` r)))
