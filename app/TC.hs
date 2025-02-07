@@ -291,10 +291,14 @@ instance Monad (ContT m) where
 
 instance ClosureFree Int where
   data CF_D Int = CF_Int (Up Int)
-
   eval (CF_Int x) = x
-
   repr x = pure (CF_Int x)
+
+instance ClosureFree Bool where
+  data CF_D Bool = CF_Bool Bool
+  eval (CF_Bool False) = [|| False ||]
+  eval (CF_Bool True)  = [|| True ||]
+  repr x = ContT $ \k -> [|| if $$x then $$(k $ CF_Bool True) else $$(k $ CF_Bool False) ||]
 
 newtype CF_Var a = CF_Var (Up a)
 
@@ -324,12 +328,30 @@ instance (ClosureFree a, ClosureFree b) => ClosureFree (a,b) where
                                               pure $ k (CF_Pair a' b')) ||]
 
 
+instance (ClosureFree a, ClosureFree b) => ClosureFree (Either a b) where
+  data CF_D (Either a b) = CF_Left (CF_D a) | CF_Right (CF_D b)
+
+  eval (CF_Left l) = [|| Left $$(eval l) ||]
+  eval (CF_Right r) = [|| Right $$(eval r) ||]
+
+  repr fx = ContT $ \k -> [|| case $$fx of
+                                Left a -> $$(sink $ do
+                                              a' <- repr [|| a ||]
+                                              pure $ k (CF_Left a'))
+                                Right b -> $$(sink $ do
+                                              b' <- repr [|| b ||]
+                                              pure $ k (CF_Right b')) ||]
+
+
 
 f_cf_d :: CF_D (Int -> Int -> Int)
 f_cf_d = CF_Func $ \i -> pure $ CF_Func $ \i2 -> pure $ CF_Int [|| $$(eval i) + $$(eval i2) ||]
 
 apply_cf_d :: CF_D (a -> b) -> CF_D a -> C (CF_D b)
 apply_cf_d (CF_Func f) x = f x
+
+pair_f :: CF_D ((Int, Bool) -> Int)
+pair_f = CF_Func $ \(CF_Pair (CF_Int i) (CF_Bool b)) -> if b then  repr i else repr [|| 1000 ||]
 
 a1 = apply_cf_d
 

@@ -26,3 +26,5 @@ r4 x = $$(sinkM $ do
                 a' <- example_cf_d
                 a1 a' r
                 )
+
+r5 x = $$(sinkM $ repr [|| x ||] >>= \r -> a1 pair_f r)
