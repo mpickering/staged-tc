@@ -308,6 +308,7 @@ getVar (CF_Var x) = x
 toVar x = CF_Var
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a -> b) where
+  -- type CF_D (a -> b) = Up a -> C (CF_D b)
   type CF_D (a -> b) = CF_D a -> C (CF_D b)
 
   eval f = [|| \x -> $$(sink $ do
