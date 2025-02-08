@@ -7,6 +7,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module TC where
 
 import Data.SOP
@@ -261,7 +263,7 @@ functor CF instance Eq Int where
 
 
 class ClosureFree (a :: Type) where
-  data CF_D a :: Type
+  type CF_D a = r | r -> a
 
   eval :: CF_D a -> Up a
 
@@ -290,15 +292,15 @@ instance Monad (ContT m) where
 
 
 instance ClosureFree Int where
-  data CF_D Int = CF_Int (Up Int)
-  eval (CF_Int x) = x
-  repr x = pure (CF_Int x)
+  type CF_D Int = Up Int
+  eval x = x
+  repr x = pure x
 
 instance ClosureFree Bool where
-  data CF_D Bool = CF_Bool Bool
-  eval (CF_Bool False) = [|| False ||]
-  eval (CF_Bool True)  = [|| True ||]
-  repr x = ContT $ \k -> [|| if $$x then $$(k $ CF_Bool True) else $$(k $ CF_Bool False) ||]
+  type CF_D Bool = Bool
+  eval (False) = [|| False ||]
+  eval (True)  = [|| True ||]
+  repr x = ContT $ \k -> [|| if $$x then $$(k $ True) else $$(k $ False) ||]
 
 newtype CF_Var a = CF_Var (Up a)
 
@@ -306,56 +308,56 @@ getVar (CF_Var x) = x
 toVar x = CF_Var
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a -> b) where
-  data CF_D (a -> b) = CF_Func (CF_D a -> C (CF_D b))
+  type CF_D (a -> b) = CF_D a -> C (CF_D b)
 
-  eval (CF_Func f) = [|| \x -> $$(sink $ do
+  eval f = [|| \x -> $$(sink $ do
                                   v' <- repr [|| x ||]
                                   v'' <- f v'
                                   pure $ eval v'') ||]
 
-  repr fx =  pure $ (CF_Func $ \x -> repr [|| $$fx $$(eval x) ||])
+  repr fx =  pure $ (\x -> repr [|| $$fx $$(eval x) ||])
 
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (a,b) where
-  data CF_D (a, b) = CF_Pair (CF_D a) (CF_D b)
+  type CF_D (a, b) = ((CF_D a), (CF_D b))
 
-  eval (CF_Pair a b) = [|| ($$(eval a), $$(eval b)) ||]
+  eval (a, b) = [|| ($$(eval a), $$(eval b)) ||]
 
   repr fx = ContT $ \k -> [|| case $$fx of
                                 (a, b) -> $$(sink $ do
                                               a' <- repr [|| a ||]
                                               b' <- repr [|| b ||]
-                                              pure $ k (CF_Pair a' b')) ||]
+                                              pure $ k (a', b')) ||]
 
 
 instance (ClosureFree a, ClosureFree b) => ClosureFree (Either a b) where
-  data CF_D (Either a b) = CF_Left (CF_D a) | CF_Right (CF_D b)
+  type CF_D (Either a b) = Either (CF_D a) (CF_D b)
 
-  eval (CF_Left l) = [|| Left $$(eval l) ||]
-  eval (CF_Right r) = [|| Right $$(eval r) ||]
+  eval (Left l) = [|| Left $$(eval l) ||]
+  eval (Right r) = [|| Right $$(eval r) ||]
 
   repr fx = ContT $ \k -> [|| case $$fx of
                                 Left a -> $$(sink $ do
                                               a' <- repr [|| a ||]
-                                              pure $ k (CF_Left a'))
+                                              pure $ k (Left a'))
                                 Right b -> $$(sink $ do
                                               b' <- repr [|| b ||]
-                                              pure $ k (CF_Right b')) ||]
+                                              pure $ k (Right b')) ||]
 
 
 
 f_cf_d :: CF_D (Int -> Int -> Int)
-f_cf_d = CF_Func $ \i -> pure $ CF_Func $ \i2 -> pure $ CF_Int [|| $$(eval i) + $$(eval i2) ||]
+f_cf_d = \i -> pure $ \i2 -> pure $ [|| $$(eval i) + $$(eval i2) ||]
 
 apply_cf_d :: CF_D (a -> b) -> CF_D a -> C (CF_D b)
-apply_cf_d (CF_Func f) x = f x
+apply_cf_d f x = f x
 
 pair_f :: CF_D ((Int, Bool) -> Int)
-pair_f = CF_Func $ \(CF_Pair (CF_Int i) (CF_Bool b)) -> if b then  repr i else repr [|| 1000 ||]
+pair_f = \(i, b) -> if b then  repr i else repr [|| 1000 ||]
 
 a1 = apply_cf_d
 
-example_cf_d = a1 f_cf_d (CF_Int [|| 1 ||])
+example_cf_d = a1 f_cf_d ( [|| 1 ||])
 
 
 
