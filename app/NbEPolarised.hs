@@ -44,7 +44,7 @@ data NE v a where
   NFunc :: Negative b => (v a -> NE v b) -> NE v (a -> b)
   NForce :: Negative a => PE v (Thunk a) -> NE v a
   NApp :: Negative b => NE v (a -> b) -> PE v a -> NE v b
-  NCase :: Negative c => PE v (Either a b) -> NE v (a -> c) -> NE v (b -> c) -> NE v c
+  NCase :: Negative c => PE v (Either a b) -> (v a -> NE v c) -> (v b -> NE v c) -> NE v c
 
 data NNf v a where
   NNf :: Negative a => C v (PNe v a) -> NNf v a
@@ -72,7 +72,9 @@ evalN (NBind (c :: NE z (Comp x)) (f :: NE z (x -> y))) = runSem @a (fmap (evalN
 evalN (NFunc f) = \x -> evalN $ f (V1 x)
 evalN (NForce pe) = eval pe
 evalN (NApp f x) = (evalN f) (eval x)
-evalN (NCase scrut k1 k2) = either (evalN k1) (evalN k2) (eval scrut)
+evalN (NCase scrut k1 k2) = case eval scrut of
+                              Left x -> (evalN (k1 (V1 x)))
+                              Right y -> (evalN (k2 (V1 y)))
 
 data V2 a = V2 { evalV2 :: String }
 
@@ -89,7 +91,9 @@ showN (NBind c f) = showN c ++ " >>= \\x -> " ++ showN f
 showN (NFunc f)   = "\\x -> " ++ showN (f (V2 "x"))
 showN (NForce pe) = "! " ++ showP pe
 showN (NApp f x)  = showN f ++ " " ++ showP x
-showN (NCase scrut k1 k2) = "either (" ++ showN k1 ++ ") (" ++ showN k2 ++ ") " ++ showP scrut
+showN (NCase scrut k1 k2) = "case " ++ showP scrut ++ " of { Left l -> "
+                              ++ showN (k1 (V2 "l")) ++ "; Right r -> "
+                              ++ showN (k2 (V2 "r")) ++ "}"
 
 type Up = Code Q
 
@@ -117,8 +121,8 @@ stageN (NFunc f)   = [|| \x -> $$(stageN $ (f (V3 [|| x ||]))) ||]
 stageN (NForce pe) = stageP pe
 stageN (NApp f x)  = [|| $$(stageN f) $$(stageP x) ||]
 stageN (NCase scrut k1 k2) = [|| case $$(stageP scrut) of
-                                    Left x -> $$(stageN k1) x
-                                    Right x -> $$(stageN k2) x ||]
+                                    Left x -> $$(stageN (k1 (V3 [|| x ||])))
+                                    Right x -> $$(stageN (k2 (V3 [|| x ||]))) ||]
 
 
 {-
@@ -137,7 +141,7 @@ c :: PE v a -> NE v (z -> Comp a)
 c x = NFunc (\_ -> NRet $ x)
 
 t3 :: NE v (Either () () -> Comp (Either () ()))
-t3 = NFunc (\x -> (NCase (PVar x) (c t2) (c t1)))
+t3 = NFunc (\x -> (NCase (PVar x) (const (NRet t2)) (const (NRet t1))))
 
 t4 :: NE v (Comp (Either () ()))
 t4 = NApp t3 t1
@@ -157,7 +161,7 @@ embNe x =
     NNf x -> runNe (fmap pnew x)
     NNfRet x -> runNe (fmap (NRet . embPf) x)
     NNfAbs f -> NFunc (embNe . f)
-    NNfCase scrut k1 k2 -> NCase (PVar scrut) (NFunc $ \x -> embNe (k1 x)) (NFunc $ \x -> embNe (k2 x))
+    NNfCase scrut k1 k2 -> NCase (PVar scrut) (\x -> embNe (k1 x)) (\x -> embNe (k2 x))
 
 embPf :: PNf v a -> PE v a
 embPf x = case x of
@@ -172,7 +176,7 @@ runNe :: forall v a . Negative a => C v (NE v a) -> NE v a
 runNe (FreeT act) = act id alg
   where
     alg :: Cover v (NE v a) -> NE v a
-    alg (Cover scrut k1 k2) = NCase (PVar scrut) (NFunc $ \x -> k1 x) (NFunc $ \x -> k2 x)
+    alg (Cover scrut k1 k2) = NCase (PVar scrut) (\x -> k1 x) (\x -> k2 x)
     alg (Bind x k) = pnew x `NBind` (NFunc $ \y -> k y)
 
 pnew :: PNe z b -> NE z b
