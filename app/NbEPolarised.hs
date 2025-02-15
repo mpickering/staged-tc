@@ -17,41 +17,42 @@ data Comp (a :: Type)
 
 data PE v a where
   PVar :: v a -> PE v a
-  PThunk :: NE v a -> PE v (Thunk a)
+  PThunk :: Negative a => NE v a -> PE v (Thunk a)
   PUnit :: PE v ()
   PL :: PE v a -> PE v (Either a b)
   PR :: PE v b -> PE v (Either a b)
 
 data PNf v a where
   PNfVar :: v a -> PNf v a
-  PNfThunk :: NNf v a -> PNf v (Thunk a)
+  PNfThunk :: Negative a => NNf v a -> PNf v (Thunk a)
   PNfUnit :: PNf v ()
   PNfL :: PNf v a -> PNf v (Either a b)
   PNfR :: PNf v b -> PNf v (Either a b)
 
 data PNe v a where
-  PNeApp :: PNe v (a -> b) -> PNf v a -> PNe v b
+  PNeApp :: Negative b => PNe v (a -> b) -> PNf v a -> PNe v b
 --  PNeCase :: PNe v (Either a b) -> PNf v
-  PNeForce :: v (Thunk a) -> PNe v a
+  PNeForce :: Negative a => v (Thunk a) -> PNe v a
 
 data NE v a where
-  NRet :: Run a => PE v a -> NE v (Comp a)
-  NBind :: Run a => NE v (Comp a) -> NE v (a -> b) -> NE v b
+  NRet :: PE v a -> NE v (Comp a)
+  NBind :: Negative b => NE v (Comp a) -> NE v (a -> b) -> NE v b
 
-  NFunc :: (v a -> PE v b) -> NE v (a -> b)
-  NForce :: PE v (Thunk a) -> NE v a
-  NApp :: NE v (a -> b) -> NE v a -> NE v b
-  NCase :: PE v (Either a b) -> NE v (a -> c) -> NE v (b -> c) -> NE v c
+  NFunc :: Negative b => (v a -> NE v b) -> NE v (a -> b)
+  NForce :: Negative a => PE v (Thunk a) -> NE v a
+  NApp :: Negative b => NE v (a -> b) -> PE v a -> NE v b
+  NCase :: Negative c => PE v (Either a b) -> NE v (a -> c) -> NE v (b -> c) -> NE v c
 
 data NNf v a where
-  NNf :: C v (PNe v a) -> NNf v a
+  NNf :: Negative a => C v (PNe v a) -> NNf v a
   NNfRet :: C v (PNf v a) -> NNf v (Comp a)
 
-  NNfAbs :: (v a -> NNf v b) -> NNf v (a -> b)
-  NNfCase :: v (Either a b) -> (v a -> NNf v r) -> (v b -> NNf v r) -> NNf v r
+  NNfAbs :: Negative b => (v a -> NNf v b) -> NNf v (a -> b)
+  NNfCase :: Negative r => v (Either a b) -> (v a -> NNf v r) -> (v b -> NNf v r) -> NNf v r
 
 
-normN x = run (nreify $ evalN x)
+normN :: forall v r a . (NRf v a) =>  NE (V1 v) a -> NE v a
+normN x =  embNe (nreify $ evalN x)
 
 data V1 v a = V1 { evalV1 :: Sem v a }
 
@@ -64,10 +65,10 @@ eval (PR x) = Right (eval x)
 
 evalN :: forall v a .  NE (V1 v) a -> Sem v a
 evalN (NRet x) = return (eval x)
-evalN (NBind (c :: NE z (Comp x)) f) = (evalN f) $ run @x (evalN @_ @(Comp _) c )
-evalN (NFunc f) = \x -> eval $ f (V1 x)
+evalN (NBind (c :: NE z (Comp x)) (f :: NE z (x -> y))) = runSem @a (fmap (evalN f) (evalN @_ @(Comp _) c ))
+evalN (NFunc f) = \x -> evalN $ f (V1 x)
 evalN (NForce pe) = eval pe
-evalN (NApp f x) = (evalN f) (evalN x)
+evalN (NApp f x) = (evalN f) (eval x)
 evalN (NCase scrut k1 k2) = either (evalN k1) (evalN k2) (eval scrut)
 
 data V2 a = V2 { evalV2 :: String }
@@ -82,9 +83,9 @@ showP (PR l)     = "(Right " ++ showP l ++ ")"
 showN :: NE V2 a -> String
 showN (NRet x) = "(return " ++  showP x ++ ")"
 showN (NBind c f) = showN c ++ " >>= \\x -> " ++ showN f
-showN (NFunc f)   = "\\x -> " ++ showP (f (V2 "x"))
+showN (NFunc f)   = "\\x -> " ++ showN (f (V2 "x"))
 showN (NForce pe) = "! " ++ showP pe
-showN (NApp f x)  = showN f ++ " " ++ showN x
+showN (NApp f x)  = showN f ++ " " ++ showP x
 showN (NCase scrut k1 k2) = "either (" ++ showN k1 ++ ") (" ++ showN k2 ++ ") " ++ showP scrut
 
 t1 :: PE v (Either () b)
@@ -93,26 +94,70 @@ t1 = PL PUnit
 t2 :: PE v (Either a ())
 t2 = PR PUnit
 
-c :: PE v a -> NE v (z -> a)
-c x = NFunc (\_ -> x)
+c :: PE v a -> NE v (z -> Comp a)
+c x = NFunc (\_ -> NRet $ x)
 
-t3 :: NE v (Either () () -> Thunk (Either () ()))
-t3 = NFunc (\x -> PThunk (NCase (PVar x) (c t2) (c t1)))
+t3 :: NE v (Either () () -> Comp (Either () ()))
+t3 = NFunc (\x -> (NCase (PVar x) (c t2) (c t1)))
+
+t4 :: NE v (Comp (Either () ()))
+t4 = NApp t3 t1
+
+norm_t4 :: NE v (Comp (Either () ()))
+norm_t4 = normN t4
+
+embNe :: NNf v a -> NE v a
+embNe x =
+  case x of
+    NNf x -> runNe (fmap pnew x)
+    NNfRet x -> runNe (fmap (NRet . embPf) x)
+    NNfAbs f -> NFunc (embNe . f)
+    NNfCase scrut k1 k2 -> NCase (PVar scrut) (NFunc $ \x -> embNe (k1 x)) (NFunc $ \x -> embNe (k2 x))
+
+  {-
+  NNf :: C v (PNe v a) -> NNf v a
+  NNfRet :: C v (PNf v a) -> NNf v (Comp a)
+
+  NNfAbs :: (v a -> NNf v b) -> NNf v (a -> b)
+  NNfCase :: v (Either a b) -> (v a -> NNf v r) -> (v b -> NNf v r) -> NNf v r
+  -}
+
+embPf :: PNf v a -> PE v a
+embPf x = case x of
+            PNfVar v -> PVar v
+            PNfThunk t -> PThunk (embNe t)
+            PNfUnit -> PUnit
+            PNfL v  -> PL (embPf v)
+            PNfR v ->  PR (embPf v)
+
+
+runNe :: forall v a . Negative a => C v (NE v a) -> NE v a
+runNe (FreeT act) = act id alg
+  where
+    alg :: Cover v (NE v a) -> NE v a
+    alg (Cover scrut k1 k2) = NCase (PVar scrut) (NFunc $ \x -> k1 x) (NFunc $ \x -> k2 x)
+    alg (Bind x k) = pnew x `NBind` (NFunc $ \y -> k y)
+
+pnew :: PNe z b -> NE z b
+pnew x =
+  case x of
+    PNeApp y z -> NApp (pnew y) (embPf z)
+    PNeForce x -> NForce (PVar x)
 
 
 type C v a = FreeT (Cover v) a
 
-class Run a where
-  run :: C v (Sem v a) -> Sem v a
+class Negative a where
+  runSem :: C v (Sem v a) -> Sem v a
 
-instance Run () where
-  run _ = ()
+instance Negative () where
+  runSem _ = ()
 
-instance Run b => Run (a -> b) where
-  run c a = run @b (c <*> pure a)
+instance Negative b => Negative (a -> b) where
+  runSem c a = runSem @b (c <*> pure a)
 
-instance Run (Comp x) where
-  run c = c >>= id
+instance Negative (Comp x) where
+  runSem c = c >>= id
 
 type family Sem v a where
    Sem v () = ()
@@ -133,7 +178,7 @@ instance NRf v x => PRf v (Thunk x) where
   preflect x = return $ nreflect (PNeForce x)
   preify = PNfThunk . nreify
 
-instance PRf v a => NRf v (Comp a) where
+instance (PRf v a) => NRf v (Comp a) where
   nreflect x = wrap (Bind x (\a -> preflect a))
   nreify  x = NNfRet (fmap preify x)
 
@@ -156,7 +201,7 @@ class PRf (v :: Type -> Type) a where
   preflect :: v a -> C v (Sem v a)
   preify :: Sem v a -> PNf v a
 
-class NRf (v :: Type -> Type) a where
+class Negative a => NRf (v :: Type -> Type) a where
   nreflect :: PNe v a -> Sem v a
   nreify :: Sem v a -> NNf v a
 
@@ -169,6 +214,7 @@ wrap fa = FreeT $ \r w -> w (fmap (\x -> freeT x r w) fa)
 data Cover v r where
   Cover :: v (Either a b) -> (v a -> r) -> (v b -> r) -> Cover v r
   Bind  :: PNe v (Comp a) -> (v a -> r) -> Cover v r
+
 
 
 instance Functor (Cover v) where
@@ -191,7 +237,7 @@ instance Monad (FreeT f) where
 
 data ContT m a = ContT { unGen :: forall r . (a -> m r) -> m r }
 
-sink :: C v (NNf v a) -> NNf v a
+sink :: Negative a => C v (NNf v a) -> NNf v a
 sink (FreeT f) = f id alg
   where
     alg (Cover v k1 k2) = NNfCase v k1 k2
