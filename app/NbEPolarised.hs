@@ -15,6 +15,45 @@ import Data.Kind
 import Language.Haskell.TH ( Code, Q)
 import Control.Monad.Identity
 
+
+data Source v a where
+  Var :: v a -> Source v a
+  Unit :: Source v ()
+  L :: Source v a -> Source v (Either a b)
+  R :: Source v a -> Source v (Either b a)
+  Case :: Source v (Either a b) -> (v a -> Source v r) -> (v b -> Source v r) -> Source v r
+
+  Lam :: (v a -> Source v b) -> Source v (a -> b)
+  App :: Source v (a -> b) -> Source v a -> Source v b
+
+type family CBV a where
+  CBV (a -> b) = Thunk (CBV a -> Comp (CBV b))
+  CBV (Either a b) = Either (CBV a) (CBV b)
+  CBV () = ()
+
+newtype CBV_V v a = CBV_V ( v (CBV a) )
+
+translate :: Source (CBV_V v) a -> NE v (Comp (CBV a))
+translate (Var (CBV_V v)) = NRet $ PVar v
+translate Unit    = NRet PUnit
+translate  (L x)   = (translate x) `NBind` NFunc (\x ->  NRet $ PL (PVar x))
+translate  (R x)   = (translate x) `NBind` NFunc (\x ->  NRet $ PR (PVar x))
+translate (Case scrut k1 k2) =
+    translate scrut `NBind` NFunc (\x -> NCase (PVar x) (\x -> translate (k1 (CBV_V x))) (\y -> translate (k2 (CBV_V y) )))
+translate (Lam f) = NRet $ PThunk (NFunc (\x -> translate (f (CBV_V x))))
+translate (App f x) =
+  translate f `NBind` NFunc (\f' -> translate x `NBind` NFunc (\x' -> NApp (NForce (PVar f')) (PVar x')))
+
+
+e1 = App (Lam $ \x -> Case (Var x) (\l -> R Unit) (\r -> L Unit)) (L Unit)
+
+norm2 :: PRf v (CBV a) => Source (CBV_V (V1 v)) a -> NE v (Comp (CBV a))
+norm2 = normN . translate
+
+stage2 :: PRf V3 (CBV a) => Source (CBV_V (V1 V3)) a -> Up (SemCode (CBV a))
+stage2 = stageN . normN . translate
+
+
 data Thunk (a :: Type)
 data Comp (a :: Type)
 
