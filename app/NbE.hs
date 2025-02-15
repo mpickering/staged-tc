@@ -108,6 +108,7 @@ showE (ECase s k1 k2) = "(either " ++ showE s ++ " " ++ showE k1 ++ " " ++ showE
 
 
 
+
 instance (Rf V1 a, Rf V1 b) => Rf V1 (a -> b) where
   type Sem V1 (a -> b) = Sem V1 a -> Sem V1 b
 

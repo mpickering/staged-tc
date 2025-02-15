@@ -8,9 +8,12 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
 module NbEPolarised where
 
 import Data.Kind
+import Language.Haskell.TH ( Code, Q)
+import Control.Monad.Identity
 
 data Thunk (a :: Type)
 data Comp (a :: Type)
@@ -88,6 +91,42 @@ showN (NForce pe) = "! " ++ showP pe
 showN (NApp f x)  = showN f ++ " " ++ showP x
 showN (NCase scrut k1 k2) = "either (" ++ showN k1 ++ ") (" ++ showN k2 ++ ") " ++ showP scrut
 
+type Up = Code Q
+
+type family SemCode a where
+   SemCode () = ()
+   SemCode (Either a b) = Either (SemCode a) (SemCode b)
+   SemCode (Thunk a) = SemCode a
+   SemCode (a -> b) = SemCode a -> SemCode b
+   SemCode (Comp a) = SemCode a
+
+
+data V3 a = V3 { evalV3 :: Up (SemCode a) }
+
+stageP :: PE V3 a -> Up (SemCode a)
+stageP (PVar x) = evalV3 x
+stageP (PThunk x) = stageN x
+stageP (PUnit) = [|| () ||]
+stageP (PL l)  = [|| Left $$(stageP l) ||]
+stageP (PR r)  = [|| Right $$(stageP r) ||]
+
+stageN :: NE V3 a -> Up (SemCode a)
+stageN (NRet x) = stageP x
+stageN (NBind c f) = [|| $$(stageN f) $$(stageN c) ||]
+stageN (NFunc f)   = [|| \x -> $$(stageN $ (f (V3 [|| x ||]))) ||]
+stageN (NForce pe) = stageP pe
+stageN (NApp f x)  = [|| $$(stageN f) $$(stageP x) ||]
+stageN (NCase scrut k1 k2) = [|| case $$(stageP scrut) of
+                                    Left x -> $$(stageN k1) x
+                                    Right x -> $$(stageN k2) x ||]
+
+
+{-
+
+example terms
+
+-}
+
 t1 :: PE v (Either () b)
 t1 = PL PUnit
 
@@ -103,8 +142,14 @@ t3 = NFunc (\x -> (NCase (PVar x) (c t2) (c t1)))
 t4 :: NE v (Comp (Either () ()))
 t4 = NApp t3 t1
 
+
+
 norm_t4 :: NE v (Comp (Either () ()))
 norm_t4 = normN t4
+
+-- Normalise and then stage expression
+stage :: NRf V3 a => NE (V1 V3) a -> Up (SemCode a)
+stage = stageN . normN
 
 embNe :: NNf v a -> NE v a
 embNe x =
@@ -113,14 +158,6 @@ embNe x =
     NNfRet x -> runNe (fmap (NRet . embPf) x)
     NNfAbs f -> NFunc (embNe . f)
     NNfCase scrut k1 k2 -> NCase (PVar scrut) (NFunc $ \x -> embNe (k1 x)) (NFunc $ \x -> embNe (k2 x))
-
-  {-
-  NNf :: C v (PNe v a) -> NNf v a
-  NNfRet :: C v (PNf v a) -> NNf v (Comp a)
-
-  NNfAbs :: (v a -> NNf v b) -> NNf v (a -> b)
-  NNfCase :: v (Either a b) -> (v a -> NNf v r) -> (v b -> NNf v r) -> NNf v r
-  -}
 
 embPf :: PNf v a -> PE v a
 embPf x = case x of
