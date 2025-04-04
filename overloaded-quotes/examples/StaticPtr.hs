@@ -4,7 +4,7 @@
 
 {-# LANGUAGE GADTs #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-module StaticPtr where
+module Lib where
 
 import Data.Binary
 import GHC.Generics
@@ -12,6 +12,7 @@ import GHC.StaticPtr
 import Data.Functor.Const
 import Data.List (find)
 import Data.Maybe (fromJust)
+import Data.Dynamic
 
 -- The source language, the result of desugaring a quoted expression.
 data Source v a where
@@ -26,8 +27,6 @@ data SE
   | SVar String
   | SApp SE SE
   | SLam String SE
-  -- There are more constructors to add in reality.
-  -- An important one is data constructors. We require that any data structure used in a quoted block must be serializable too.
   deriving Generic
 
 -- Proof that `SE` is serializable.
@@ -47,3 +46,18 @@ encode' env (Lam f)         = let x = fresh env in SLam x (encode' (x : env) (f 
 
 fresh :: [String] -> String
 fresh env = fromJust $ find (`notElem` env) $ map show ['a' ..]
+
+
+-- On the receiving end of the communicated expression, we need to deserialize `SE` into a regular Haskell term.
+-- At the moment this is done in a non-type safe way, perhaps its possible to do better!
+
+
+-- Attempt using `Dynamic`
+decode :: SE -> Dynamic
+decode = decode' []
+
+decode' :: [(String, Dynamic)] -> SE -> Dynamic
+decode' env (SExt p) = _ -- We want to use `unsafeLookupStaticPtr` or something, but we don't know the type of the external. Not sure how to do this.
+decode' env (SVar x) = fromJust $ lookup x env
+decode' env (SApp t u) = toDyn (fromDyn (decode' env t) $ fromDyn (decode' env u)) -- This also doesn't work because we don't know typing information.
+decode' env (SLam x t) = toDyn $ \v -> decode' ((x, v) : env) t
