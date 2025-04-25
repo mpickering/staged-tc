@@ -19,5 +19,8 @@ add1 x = x + 1
 main = do
   let f = fromJust $ decode (typeRep @(Int -> Int)) $ encode foo'
   print $ f 3
-  -- let f :: Int -> Int = fromJust $ lookupStaticPtr $ staticKey (static add1)
-  -- print $ f 3
+
+
+-- Packet -> Bool
+
+-- [|| \packet -> packet.size > 5 ||]

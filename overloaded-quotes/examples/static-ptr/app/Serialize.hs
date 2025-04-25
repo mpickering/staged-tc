@@ -149,7 +149,7 @@ infer ctxt = \case
   SExt (SomeTypeRep a) key -> do
     HRefl <- isType a
     val <- lookupStaticPtr key
-    pure $ Check a val
+    pure $ Check a (EExt val)
   SVar x -> do
     CheckVar a n <- lookupVar x ctxt
     pure $ Check a (EVar n)
