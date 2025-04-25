@@ -17,13 +17,18 @@ common warnings
 executable static-ptr
     import:           warnings
     main-is:          Main.hs
-    -- other-modules:
+    other-modules:
+        Serialize,
     -- other-extensions:
     build-depends:
         base,
         binary,
+        sop-core,
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:
+        DataKinds,
         GADTs,
+        LambdaCase,
         StaticPointers,
+        ScopedTypeVariables,
